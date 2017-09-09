@@ -32,8 +32,6 @@ class ITSEC_Backup {
 	 */
 	function run() {
 
-		global $itsec_globals;
-
 		$this->settings = ITSEC_Modules::get_settings( 'backup' );
 
 		add_action( 'itsec_execute_backup_cron', array( $this, 'do_backup' ) );
@@ -48,6 +46,11 @@ class ITSEC_Backup {
 			return;
 		}
 
+		if ( ! $this->settings['enabled'] || $this->settings['interval'] <= 0 ) {
+			// Don't run when scheduled backups aren't enabled or the interval is zero or less.
+			return;
+		}
+
 		if ( defined( 'DOING_AJAX' ) && DOING_AJAX ) {
 			// Don't run on AJAX requests.
 			return;
@@ -58,15 +61,10 @@ class ITSEC_Backup {
 			return;
 		}
 
-		if ( $this->settings['interval'] <= 0 ) {
-			// Don't run when the interval is zero or less.
-			return;
-		}
-
 
 		$next_run = $this->settings['last_run'] + $this->settings['interval'] * DAY_IN_SECONDS;
 
-		if ( $next_run <= $itsec_globals['current_time_gmt'] ) {
+		if ( $next_run <= ITSEC_Core::get_current_time_gmt() ) {
 			add_action( 'init', array( $this, 'do_backup' ), 10, 0 );
 		}
 	}
@@ -83,16 +81,15 @@ class ITSEC_Backup {
 	 * @return mixed false on error or nothing
 	 */
 	public function do_backup( $one_time = false ) {
-		$itsec_files = ITSEC_Core::get_itsec_files();
 
-		if ( ! $itsec_files->get_file_lock( 'backup' ) ) {
+		if ( ! ITSEC_Lib::get_lock( 'backup', 180 ) ) {
 			return new WP_Error( 'itsec-backup-do-backup-already-running', __( 'Unable to create a backup at this time since a backup is currently being created. If you wish to create an additional backup, please wait a few minutes before trying again.', 'better-wp-security' ) );
 		}
 
 
 		ITSEC_Lib::set_minimum_memory_limit( '256M' );
 		$this->execute_backup( $one_time );
-		$itsec_files->release_file_lock( 'backup' );
+		ITSEC_Lib::release_lock( 'backup' );
 
 		switch ( $this->settings['method'] ) {
 
@@ -235,7 +232,7 @@ class ITSEC_Backup {
 		if ( 1 === $this->settings['method'] ) {
 			@unlink( $file );
 		} else if ( $this->settings['retain'] > 0 ) {
-			$files = scandir( $dir, SCANDIR_SORT_DESCENDING );
+			$files = scandir( $dir, 1 );
 
 			if ( is_array( $files ) && count( $files ) > 0 ) {
 				$count = 0;
